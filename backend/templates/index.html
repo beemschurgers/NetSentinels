@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Live Packet Capture</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            font-size: 12px;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #ccc;
+            padding: 6px 4px;
+            text-align: left;
+        }
+        th {
+            background-color: #f5f5f5;
+            font-weight: bold;
+            position: sticky;
+            top: 0;
+        }
+        tr:nth-child(even) { background-color: #f9f9f9; }
+        tr:hover { background-color: #e5e5e5; }
+        .protocol { font-weight: bold; }
+        .tcp { color: #0066cc; }
+        .udp { color: #cc6600; }
+        .icmp { color: #cc0066; }
+        .arp { color: #009900; }
+    </style>
+</head>
+<body>
+    <h1>Live Packet Capture</h1>
+    <table>
+        <thead>
+            <tr>
+                <th>Time</th>
+                <th>Protocol</th>
+                <th>Source</th>
+                <th>Destination</th>
+                <th>Application</th>
+                <th>Flags</th>
+                <th>Size</th>
+                <th>TTL</th>
+                <th>Country</th>
+            </tr>
+        </thead>
+        <tbody id="packets"></tbody>
+    </table>
+    <script>
+        const ws = new WebSocket("ws://localhost:8000/ws/packets");
+        ws.onmessage = function(event) {
+            let data;
+            try {
+                data = JSON.parse(event.data);
+                console.log("Received data:", data); // Debug log to see actual data structure
+
+                // Extract traffic data from the WebSocket response
+                const traffic = data.traffic;
+                if (traffic) {
+                    const tr = document.createElement("tr");
+                    tr.innerHTML = `<td>${traffic.timestamp || 'N/A'}</td>
+                                    <td class="protocol ${traffic.protocol ? traffic.protocol.toLowerCase() : ''}">${traffic.protocol || 'N/A'}</td>
+                                    <td>${traffic.src_ip || 'N/A'}${traffic.src_port ? ':' + traffic.src_port : ''}</td>
+                                    <td>${traffic.dst_ip || 'N/A'}${traffic.dst_port ? ':' + traffic.dst_port : ''}</td>
+                                    <td>${traffic.application || 'N/A'}</td>
+                                    <td>${traffic.flags || 'N/A'}</td>
+                                    <td>${traffic.size || 'N/A'}</td>
+                                    <td>${traffic.ttl || 'N/A'}</td>
+                                    <td>${traffic.country || 'N/A'}</td>`;
+                    document.getElementById("packets").appendChild(tr);
+
+                    // Keep only the last 100 rows for performance
+                    const tbody = document.getElementById("packets");
+                    while (tbody.children.length > 100) {
+                        tbody.removeChild(tbody.firstChild);
+                    }
+                } else {
+                    console.log("No traffic data in message, got:", data);
+                }
+            } catch (error) {
+                console.error("Error parsing WebSocket data:", error);
+                // Show error in table
+                const tr = document.createElement("tr");
+                tr.innerHTML = `<td colspan="9" style="color: red;">Error: ${error.message}</td>`;
+                document.getElementById("packets").appendChild(tr);
+            }
+        };
+
+        ws.onopen = function() {
+            console.log("WebSocket connected");
+        };
+
+        ws.onerror = function(error) {
+            console.error("WebSocket error:", error);
+        };
+
+        ws.onclose = function() {
+            console.log("WebSocket connection closed");
+        };
+    </script>
+</body>
+</html>

@@ -1,0 +1,2 @@
+:: Start the FastAPI backend with admin privileges and conda environment
+powershell -Command "Start-Process cmd -ArgumentList '/k cd /d %CD% && conda activate netsentinel && uvicorn main:app --reload' -Verb RunAs"

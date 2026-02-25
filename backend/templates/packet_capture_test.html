@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Live Packet Capture Test</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .status {
+            background: #e8f5e8;
+            padding: 10px;
+            border-radius: 5px;
+            margin-bottom: 20px;
+        }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: white;
+            padding: 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .stat-title {
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        .stat-value {
+            font-size: 1.2em;
+            color: #007bff;
+        }
+        .traffic-log {
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            height: 400px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+        .packet-entry {
+            padding: 8px;
+            border-bottom: 1px solid #eee;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .packet-entry:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+        .error {
+            background: #ffe6e6;
+            color: #d00;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .protocol-tcp { color: #28a745; }
+        .protocol-udp { color: #ffc107; }
+        .protocol-icmp { color: #dc3545; }
+        .top-list {
+            max-height: 200px;
+            overflow-y: auto;
+        }
+        .top-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 2px 0;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Live Packet Capture Monitor</h1>
+
+        <div id="connection-status" class="status">
+            Connecting to packet capture stream...
+        </div>
+
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="stat-title">Total Bandwidth</div>
+                <div class="stat-value" id="total-bandwidth">0 MB</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Current Rate</div>
+                <div class="stat-value" id="current-rate">0 Mbps</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Total Connections</div>
+                <div class="stat-value" id="total-connections">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Active Connections</div>
+                <div class="stat-value" id="active-connections">0</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Network Health</div>
+                <div class="stat-value" id="health-score">100%</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Peak Bandwidth</div>
+                <div class="stat-value" id="peak-bandwidth">0 MB</div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <div class="stat-card">
+                <div class="stat-title">Top Talkers</div>
+                <div id="top-talkers" class="top-list"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Protocol Distribution</div>
+                <div id="protocol-dist" class="top-list"></div>
+            </div>
+        </div>
+
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+            <div class="stat-card">
+                <div class="stat-title">Top Ports</div>
+                <div id="top-ports" class="top-list"></div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-title">Geographic Traffic</div>
+                <div id="geo-traffic" class="top-list"></div>
+            </div>
+        </div>
+
+        <div class="stat-card">
+            <h3>Live Traffic Log</h3>
+            <div id="traffic-log" class="traffic-log"></div>
+        </div>
+    </div>
+
+    <script>
+        let ws;
+        let packetCount = 0;
+
+        function connectWebSocket() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws/packets`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = function() {
+                document.getElementById('connection-status').innerHTML =
+                    '<span style="color: green;">✅ Connected to packet capture stream</span>';
+                console.log('WebSocket connected');
+            };
+
+            ws.onmessage = function(event) {
+                try {
+                    const data = JSON.parse(event.data);
+
+                    if (data.error) {
+                        showError(data.error);
+                        return;
+                    }
+
+                    // Update statistics
+                    if (data.statistics) {
+                        updateStatistics(data.statistics);
+                    }
+
+                    // Display traffic data
+                    if (data.traffic) {
+                        displayTrafficData(data.traffic);
+                    }
+
+                } catch (error) {
+                    console.error('Error parsing WebSocket message:', error);
+                    showError('Error parsing data: ' + error.message);
+                }
+            };
+
+            ws.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                showError('WebSocket connection error');
+            };
+
+            ws.onclose = function() {
+                document.getElementById('connection-status').innerHTML =
+                    '<span style="color: red;">❌ Disconnected. Attempting to reconnect...</span>';
+                // Attempt to reconnect after 3 seconds
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+
+        function updateStatistics(stats) {
+            document.getElementById('total-bandwidth').textContent =
+                (stats.total_bandwidth_mb || 0).toFixed(2) + ' MB';
+            document.getElementById('current-rate').textContent =
+                (stats.current_bandwidth_mbps || 0).toFixed(3) + ' Mbps';
+            document.getElementById('total-connections').textContent =
+                stats.total_connections || 0;
+            document.getElementById('active-connections').textContent =
+                stats.active_connections || 0;
+            document.getElementById('health-score').textContent =
+                (stats.network_health_score || 100) + '%';
+            document.getElementById('peak-bandwidth').textContent =
+                (stats.peak_bandwidth_mb || 0).toFixed(3) + ' MB';
+
+            // Update top talkers
+            updateTopList('top-talkers', stats.top_talkers, 'bytes');
+
+            // Update protocol distribution
+            updateTopList('protocol-dist', stats.protocol_distribution, 'bytes');
+
+            // Update top ports
+            updateTopList('top-ports', stats.top_ports, 'connections');
+
+            // Update geographic traffic
+            updateTopList('geo-traffic', stats.geographic_traffic, 'bytes');
+        }
+
+        function updateTopList(elementId, data, unit) {
+            const element = document.getElementById(elementId);
+            if (!data) {
+                element.innerHTML = '<div class="top-item">No data</div>';
+                return;
+            }
+
+            let html = '';
+            const entries = Object.entries(data).slice(0, 8);
+
+            for (const [key, value] of entries) {
+                const displayValue = unit === 'bytes' ?
+                    (value > 1024 ? (value/1024).toFixed(1) + 'K' : value) : value;
+                html += `<div class="top-item"><span>${key}</span><span>${displayValue}</span></div>`;
+            }
+
+            element.innerHTML = html || '<div class="top-item">No data</div>';
+        }
+
+        function displayTrafficData(traffic) {
+            packetCount++;
+            const logElement = document.getElementById('traffic-log');
+
+            const entry = document.createElement('div');
+            entry.className = 'packet-entry';
+
+            let protocolClass = '';
+            if (traffic.protocol === 'TCP') protocolClass = 'protocol-tcp';
+            else if (traffic.protocol === 'UDP') protocolClass = 'protocol-udp';
+            else if (traffic.protocol === 'ICMP') protocolClass = 'protocol-icmp';
+
+            const flags = traffic.flags ? ` [${traffic.flags.join(',')}]` : '';
+            const ports = traffic.src_port && traffic.dst_port ?
+                `:${traffic.src_port} → :${traffic.dst_port}` : '';
+
+            entry.innerHTML = `
+                <span style="color: #666;">[${traffic.timestamp}]</span>
+                <span class="${protocolClass}"><strong>${traffic.protocol}</strong></span>
+                ${traffic.src_ip || 'Unknown'} → ${traffic.dst_ip || 'Unknown'}${ports}
+                <span style="color: #999;">${traffic.bytes_sent || 0}B${flags}</span>
+                ${traffic.application ? `<span style="color: #007bff;"> (${traffic.application})</span>` : ''}
+            `;
+
+            logElement.appendChild(entry);
+
+            // Limit log entries to prevent memory issues
+            while (logElement.children.length > 100) {
+                logElement.removeChild(logElement.firstChild);
+            }
+
+            // Auto-scroll to bottom
+            logElement.scrollTop = logElement.scrollHeight;
+        }
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'error';
+            errorDiv.textContent = message;
+
+            const container = document.querySelector('.container');
+            container.insertBefore(errorDiv, container.firstChild);
+
+            // Remove error after 10 seconds
+            setTimeout(() => {
+                if (errorDiv.parentNode) {
+                    errorDiv.parentNode.removeChild(errorDiv);
+                }
+            }, 10000);
+        }
+
+        // Start connection when page loads
+        connectWebSocket();
+    </script>
+</body>
+</html>
+
