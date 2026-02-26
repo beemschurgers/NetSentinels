@@ -1,0 +1,2 @@
+The purpose of this folder is to hold the machine learning model required to detect networks anomaly
+The models will be named **stage1_model.pkl** and **stage2_model.pkl**, where as the first stage serve as a anomalies filter, and the second stage serve as anomalies type detection
